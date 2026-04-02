@@ -69,4 +69,32 @@ rules:
     expect(parsed.proxies[0].name).toBe('HK-Node-1');
     expect(parsed.rules).toEqual(['MATCH,DIRECT']);
   });
+
+  it('should keep direct proxies from clash yaml input in preserve mode', async () => {
+    const baseConfig = {
+      __meta: {
+        type: 'clash',
+        mode: 'preserve',
+        format: 'raw-yaml'
+      },
+      rawContent: `# keep me
+proxy-groups:
+  - {name: 🚀 默认代理, type: select, proxies: [直连]}
+rules:
+  - MATCH,🚀 默认代理
+`
+    };
+
+    const input = `proxies:
+  - {name: 直连, type: direct}
+  - {name: HK-Node-1, type: ss, server: example.com, port: 443, cipher: aes-128-gcm, password: test}
+`;
+
+    const builder = new ClashConfigBuilder(input, 'balanced', [], baseConfig, 'zh-CN', 'mihomo/1.0');
+    const text = await builder.build();
+    const parsed = yaml.load(text);
+
+    expect(text).toContain('- {name: 直连, type: direct}');
+    expect(parsed.proxies.map(proxy => proxy.name)).toEqual(['直连', 'HK-Node-1']);
+  });
 });

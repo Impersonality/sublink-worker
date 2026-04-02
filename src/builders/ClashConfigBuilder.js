@@ -206,6 +206,11 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
     convertProxy(proxy) {
         const clashExtras = proxy?.dialer_proxy !== undefined ? { 'dialer-proxy': proxy.dialer_proxy } : {};
         switch (proxy.type) {
+            case 'direct':
+                return {
+                    name: proxy.tag,
+                    type: 'direct'
+                };
             case 'shadowsocks':
                 return {
                     name: proxy.tag,

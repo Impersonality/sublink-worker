@@ -8,6 +8,11 @@ export function convertYamlProxyToObject(p) {
         return Array.isArray(value) ? value : [value];
     };
     switch (type) {
+        case 'direct':
+            return {
+                tag: name,
+                type: 'direct'
+            };
         case 'ss':
         case 'shadowsocks':
             return {
