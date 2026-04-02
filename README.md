@@ -67,6 +67,18 @@ Sing-Box • Clash • Xray/V2Ray • Surge
 - Multi-language support (Chinese, English, Persian, Russian)
 - Web interface with predefined rule sets and customizable policy groups
 
+## 📝 Custom Config Reminder
+
+If you want to reuse a previously saved custom config, open the homepage with `?configId=...` first, then paste new nodes and click Convert.
+
+Example:
+
+```text
+https://sub.3773774.xyz/?configId=clash_3773
+```
+
+Note: use `?configId=...`, not `&configId=...`.
+
 ## 🤝 Contributing
 
 Issues and Pull Requests are welcome to improve this project.
