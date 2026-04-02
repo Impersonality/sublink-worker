@@ -204,6 +204,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
     }
 
     convertProxy(proxy) {
+        const clashExtras = proxy?.dialer_proxy !== undefined ? { 'dialer-proxy': proxy.dialer_proxy } : {};
         switch (proxy.type) {
             case 'shadowsocks':
                 return {
@@ -215,7 +216,8 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
                     password: proxy.password,
                     ...(typeof proxy.udp !== 'undefined' ? { udp: proxy.udp } : {}),
                     ...(proxy.plugin ? { plugin: proxy.plugin } : {}),
-                    ...(proxy.plugin_opts ? { 'plugin-opts': proxy.plugin_opts } : {})
+                    ...(proxy.plugin_opts ? { 'plugin-opts': proxy.plugin_opts } : {}),
+                    ...clashExtras
                 };
             case 'vmess':
                 return {
@@ -258,7 +260,8 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
                             path: proxy.transport.path,
                             host: proxy.transport.host
                         }
-                        : undefined
+                        : undefined,
+                    ...clashExtras
                 };
             case 'vless':
                 return {
@@ -289,6 +292,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
                     ...(proxy.alpn ? { alpn: proxy.alpn } : {}),
                     ...(proxy.packet_encoding ? { 'packet-encoding': proxy.packet_encoding } : {}),
                     'flow': proxy.flow ?? undefined,
+                    ...clashExtras
                 };
             case 'hysteria2':
                 return {
@@ -309,6 +313,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
                     ...(proxy.hop_interval !== undefined ? { 'hop-interval': proxy.hop_interval } : {}),
                     ...(proxy.alpn ? { alpn: proxy.alpn } : {}),
                     ...(proxy.fast_open !== undefined ? { 'fast-open': proxy.fast_open } : {}),
+                    ...clashExtras
                 };
             case 'trojan':
                 return {
@@ -337,6 +342,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
                     'skip-cert-verify': !!proxy.tls?.insecure,
                     ...(proxy.alpn ? { alpn: proxy.alpn } : {}),
                     'flow': proxy.flow ?? undefined,
+                    ...clashExtras
                 };
             case 'tuic':
                 return {
@@ -355,6 +361,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
                     ...(proxy.zero_rtt !== undefined ? { 'zero-rtt': proxy.zero_rtt } : {}),
                     ...(proxy.reduce_rtt !== undefined ? { 'reduce-rtt': proxy.reduce_rtt } : {}),
                     ...(proxy.fast_open !== undefined ? { 'fast-open': proxy.fast_open } : {}),
+                    ...clashExtras
                 };
             case 'anytls':
                 return {
@@ -371,6 +378,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
                     ...(proxy['idle-session-check-interval'] !== undefined ? { 'idle-session-check-interval': proxy['idle-session-check-interval'] } : {}),
                     ...(proxy['idle-session-timeout'] !== undefined ? { 'idle-session-timeout': proxy['idle-session-timeout'] } : {}),
                     ...(proxy['min-idle-session'] !== undefined ? { 'min-idle-session': proxy['min-idle-session'] } : {}),
+                    ...clashExtras
                 };
             default:
                 return proxy; // Return as-is if no specific conversion is defined
@@ -768,7 +776,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
         } else if (sectionKey === 'rule-providers' || sectionKey === 'proxy-providers') {
             preferredKeys = ['type', 'format', 'behavior', 'url', 'path', 'interval', 'health-check'];
         } else if (sectionKey === 'proxies') {
-            preferredKeys = ['name', 'type', 'server', 'port', 'ports', 'uuid', 'password', 'cipher', 'udp', 'tls', 'client-fingerprint', 'servername', 'sni', 'network', 'ws-opts', 'reality-opts', 'grpc-opts', 'tfo', 'skip-cert-verify', 'flow'];
+            preferredKeys = ['name', 'type', 'server', 'port', 'ports', 'uuid', 'password', 'cipher', 'udp', 'dialer-proxy', 'tls', 'client-fingerprint', 'servername', 'sni', 'network', 'ws-opts', 'reality-opts', 'grpc-opts', 'tfo', 'skip-cert-verify', 'flow'];
         }
 
         const normalized = {};

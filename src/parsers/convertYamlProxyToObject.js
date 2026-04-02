@@ -2,6 +2,7 @@ export function convertYamlProxyToObject(p) {
     if (!p || typeof p !== 'object' || !p.type) return null;
     const type = String(p.type).toLowerCase();
     const name = p.name || p.tag || 'proxy';
+    const clashExtras = p['dialer-proxy'] !== undefined ? { dialer_proxy: p['dialer-proxy'] } : {};
     const toArray = (value) => {
         if (value === undefined || value === null) return undefined;
         return Array.isArray(value) ? value : [value];
@@ -20,7 +21,8 @@ export function convertYamlProxyToObject(p) {
                 tcp_fast_open: !!p['fast-open'],
                 udp: typeof p.udp !== 'undefined' ? !!p.udp : undefined,
                 plugin: p.plugin,
-                plugin_opts: p['plugin-opts']
+                plugin_opts: p['plugin-opts'],
+                ...clashExtras
             };
         case 'vmess': {
             const tlsEnabled = !!p.tls;
@@ -65,7 +67,8 @@ export function convertYamlProxyToObject(p) {
                 tls,
                 udp: typeof p.udp !== 'undefined' ? !!p.udp : undefined,
                 packet_encoding: p['packet-encoding'],
-                alpn: toArray(p.alpn)
+                alpn: toArray(p.alpn),
+                ...clashExtras
             };
         }
         case 'vless': {
@@ -120,7 +123,8 @@ export function convertYamlProxyToObject(p) {
                 flow: p.flow ?? undefined,
                 udp: typeof p.udp !== 'undefined' ? !!p.udp : undefined,
                 packet_encoding: p['packet-encoding'],
-                alpn: toArray(p.alpn)
+                alpn: toArray(p.alpn),
+                ...clashExtras
             };
         }
         case 'trojan': {
@@ -173,7 +177,8 @@ export function convertYamlProxyToObject(p) {
                 tls,
                 transport,
                 flow: p.flow ?? undefined,
-                alpn: toArray(p.alpn)
+                alpn: toArray(p.alpn),
+                ...clashExtras
             };
         }
         case 'hysteria2':
@@ -206,7 +211,8 @@ export function convertYamlProxyToObject(p) {
                 ports: p.ports,
                 hop_interval: Number.isNaN(hopInterval) ? hopIntervalRaw : hopInterval,
                 alpn: toArray(p.alpn),
-                fast_open: typeof p['fast-open'] !== 'undefined' ? !!p['fast-open'] : undefined
+                fast_open: typeof p['fast-open'] !== 'undefined' ? !!p['fast-open'] : undefined,
+                ...clashExtras
             };
         }
         case 'tuic': {
@@ -229,7 +235,8 @@ export function convertYamlProxyToObject(p) {
                 zero_rtt: typeof p['zero-rtt'] !== 'undefined' ? !!p['zero-rtt'] : undefined,
                 reduce_rtt: typeof p['reduce-rtt'] !== 'undefined' ? !!p['reduce-rtt'] : undefined,
                 fast_open: typeof p['fast-open'] !== 'undefined' ? !!p['fast-open'] : undefined,
-                disable_sni: typeof p['disable-sni'] !== 'undefined' ? !!p['disable-sni'] : undefined
+                disable_sni: typeof p['disable-sni'] !== 'undefined' ? !!p['disable-sni'] : undefined,
+                ...clashExtras
             };
         }
         case 'anytls': {
@@ -255,7 +262,8 @@ export function convertYamlProxyToObject(p) {
                 'idle-session-check-interval': p['idle-session-check-interval'],
                 'idle-session-timeout': p['idle-session-timeout'],
                 'min-idle-session': p['min-idle-session'],
-                tls
+                tls,
+                ...clashExtras
             };
         }
         default:

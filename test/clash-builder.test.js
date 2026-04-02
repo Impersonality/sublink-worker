@@ -152,6 +152,21 @@ ss://YWVzLTEyOC1nY206dGVzdA@example.com:443#HK-Node-1
     expect(yamlText).toContain('name: 🐟 漏网之鱼, type: select, proxies: [🚀 节点选择, 🔁 故障转移, ⚡ 自动选择, DIRECT]');
   });
 
+  it('should preserve dialer-proxy from clash yaml input', async () => {
+    const input = `
+proxies:
+  - {name: Chain-SS, type: ss, server: 5.83.138.114, port: 48908, cipher: 2022-blake3-chacha20-poly1305, password: "test-pass", udp: true, dialer-proxy: HK-VLESS}
+`;
+
+    const builder = new ClashConfigBuilder(input, 'minimal', [], null, 'zh-CN', 'mihomo/1.0');
+    const yamlText = await builder.build();
+    const built = yaml.load(yamlText);
+
+    expect(built.proxies).toHaveLength(1);
+    expect(built.proxies[0]['dialer-proxy']).toBe('HK-VLESS');
+    expect(yamlText).toContain('dialer-proxy: HK-VLESS');
+  });
+
   it('should include richer domain rules in balanced preset', async () => {
     const input = `
 ss://YWVzLTEyOC1nY206dGVzdA@example.com:443#HK-Node-1
