@@ -23,7 +23,7 @@ export const UNIFIED_RULES = [
 	},
 	{
 		name: 'Youtube',
-		site_rules: ['youtube'],
+		site_rules: ['youtube', 'twitch'],
 		ip_rules: []
 	},
 	{
@@ -33,7 +33,7 @@ export const UNIFIED_RULES = [
 	},
 	{
 		name: 'Private',
-		site_rules: [],
+		site_rules: ['private'],
 		ip_rules: ['private']
 	},
 	{
@@ -43,7 +43,7 @@ export const UNIFIED_RULES = [
 	},
 	{
 		name: 'Telegram',
-		site_rules: [],
+		site_rules: ['telegram'],
 		ip_rules: ['telegram']
 	},
 	{
@@ -53,7 +53,7 @@ export const UNIFIED_RULES = [
 	},
 	{
 		name: 'Microsoft',
-		site_rules: ['microsoft'],
+		site_rules: ['microsoft', 'onedrive'],
 		ip_rules: []
 	},
 	{

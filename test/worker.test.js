@@ -77,6 +77,41 @@ describe('Worker', () => {
         expect(text).toContain('proxies:');
     });
 
+    it('preserve mode should keep raw Clash config and append new proxies', async () => {
+        const app = createTestApp();
+        const baseConfig = `# keep me
+proxy-groups:
+  - {name: 🚀 默认代理, type: select, proxies: [直连]}
+rules:
+  - MATCH,🚀 默认代理
+`;
+
+        const saveRes = await app.request('http://localhost/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                type: 'clash',
+                mode: 'preserve',
+                content: baseConfig
+            })
+        });
+
+        expect(saveRes.status).toBe(200);
+        const configId = await saveRes.text();
+        expect(configId).toBeTruthy();
+
+        const nodeConfig = 'ss://YWVzLTEyOC1nY206dGVzdA@example.com:443#HK-Node-1';
+        const clashRes = await app.request(`http://localhost/clash?config=${encodeURIComponent(nodeConfig)}&configId=${encodeURIComponent(configId)}`);
+        expect(clashRes.status).toBe(200);
+        const text = await clashRes.text();
+
+        expect(text).toContain('# keep me');
+        expect(text).toContain('proxy-groups:\n  - {name: 🚀 默认代理, type: select, proxies: [直连]}');
+        expect(text).toContain('rules:\n  - MATCH,🚀 默认代理');
+        expect(text).toContain('proxies:\n  - {name: HK-Node-1');
+        expect(text).not.toContain('🐟 漏网之鱼');
+    });
+
     it('GET /shorten-v2 returns short code', async () => {
         const url = 'http://example.com';
         const kvMock = {

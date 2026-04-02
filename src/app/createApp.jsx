@@ -333,9 +333,9 @@ export function createApp(bindings = {}) {
 
     app.post('/config', async (c) => {
         try {
-            const { type, content } = await c.req.json();
+            const { type, content, mode } = await c.req.json();
             const storage = requireConfigStorage(services.configStorage);
-            const configId = await storage.saveConfig(type, content);
+            const configId = await storage.saveConfig(type, content, { mode });
             return c.text(configId);
         } catch (error) {
             if (error instanceof SyntaxError) {

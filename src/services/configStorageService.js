@@ -26,14 +26,14 @@ export class ConfigStorageService {
         }
     }
 
-    async saveConfig(type, content) {
+    async saveConfig(type, content, options = {}) {
         if (!type) {
             throw new InvalidPayloadError('Missing config type');
         }
 
         const kv = this.ensureKv();
         const configId = `${type}_${generateWebPath(8)}`;
-        const configString = this.serializeConfig(type, content);
+        const configString = this.serializeConfig(type, content, options);
 
         // Validate string is JSON before storing
         JSON.parse(configString);
@@ -44,8 +44,25 @@ export class ConfigStorageService {
         return configId;
     }
 
-    serializeConfig(type, content) {
+    serializeConfig(type, content, options = {}) {
+        const mode = options?.mode || 'standard';
+
         if (type === 'clash') {
+            if (mode === 'preserve') {
+                if (typeof content !== 'string') {
+                    throw new InvalidPayloadError('Clash preserve mode requires raw YAML text');
+                }
+                yaml.load(content);
+                return JSON.stringify({
+                    __meta: {
+                        type,
+                        mode: 'preserve',
+                        format: 'raw-yaml'
+                    },
+                    rawContent: content
+                });
+            }
+
             if (typeof content === 'string' && (content.trim().startsWith('-') || content.includes(':'))) {
                 const yamlConfig = yaml.load(content);
                 return JSON.stringify(yamlConfig);

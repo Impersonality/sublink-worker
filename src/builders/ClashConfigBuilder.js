@@ -1,5 +1,5 @@
 import yaml from 'js-yaml';
-import { CLASH_CONFIG, generateRules, generateClashRuleSets, getOutbounds, PREDEFINED_RULE_SETS, DIRECT_DEFAULT_RULES } from '../config/index.js';
+import { CLASH_CONFIG, generateRules, generateClashRuleSets, getOutbounds, PREDEFINED_RULE_SETS } from '../config/index.js';
 import { BaseConfigBuilder } from './BaseConfigBuilder.js';
 import { deepCopy, groupProxiesByCountry } from '../utils.js';
 import { addProxyWithDedup } from './helpers/proxyHelpers.js';
@@ -41,6 +41,13 @@ function supportsMrsFormat(userAgent) {
 
 export class ClashConfigBuilder extends BaseConfigBuilder {
     constructor(inputString, selectedRules, customRules, baseConfig, lang, userAgent, groupByCountry = false, enableClashUI = false, externalController, externalUiDownloadUrl, includeAutoSelect = true) {
+        let preserveRawConfig = null;
+        let preserveParsedConfig = null;
+        if (baseConfig?.__meta?.type === 'clash' && baseConfig?.__meta?.mode === 'preserve' && typeof baseConfig?.rawContent === 'string') {
+            preserveRawConfig = baseConfig.rawContent;
+            preserveParsedConfig = yaml.load(preserveRawConfig) || {};
+            baseConfig = { proxies: [] };
+        }
         if (!baseConfig) {
             baseConfig = CLASH_CONFIG;
         }
@@ -52,6 +59,86 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
         this.enableClashUI = enableClashUI;
         this.externalController = externalController;
         this.externalUiDownloadUrl = externalUiDownloadUrl;
+        this.preserveMode = Boolean(preserveRawConfig);
+        this.preserveRawConfig = preserveRawConfig;
+        this.preserveParsedConfig = preserveParsedConfig;
+        this.preserveAppendedProxies = [];
+        this.preserveExistingProxyNames = new Set(
+            Array.isArray(preserveParsedConfig?.proxies)
+                ? preserveParsedConfig.proxies.map(proxy => proxy?.name).filter(Boolean)
+                : []
+        );
+    }
+
+    getHiddenRuleGroups() {
+        return new Set(['Private', 'Location:CN', 'Non-China']);
+    }
+
+    renderInlineProxyLine(proxy) {
+        const normalized = this.normalizeInlineObject('proxies', proxy);
+        const rendered = yaml.dump([normalized], {
+            flowLevel: 1,
+            lineWidth: -1,
+            noRefs: true
+        }).trimEnd();
+        return rendered.split('\n').map(line => `  ${line}`).join('\n');
+    }
+
+    mergePreserveRawConfig() {
+        const raw = typeof this.preserveRawConfig === 'string' ? this.preserveRawConfig : '';
+        if (this.preserveAppendedProxies.length === 0) {
+            return raw;
+        }
+
+        const proxyLines = this.preserveAppendedProxies.map(proxy => this.renderInlineProxyLine(proxy)).join('\n');
+        const lines = raw.split(/\r?\n/);
+        const proxiesIndex = lines.findIndex(line => /^proxies:\s*(#.*)?$/.test(line.trim()));
+
+        if (proxiesIndex >= 0) {
+            let insertAt = lines.length;
+            for (let i = proxiesIndex + 1; i < lines.length; i++) {
+                const line = lines[i];
+                if (/^\S/.test(line) && !line.startsWith('#')) {
+                    insertAt = i;
+                    break;
+                }
+            }
+
+            const before = lines.slice(0, insertAt).join('\n').replace(/\s*$/, '');
+            const after = lines.slice(insertAt).join('\n').replace(/^\s*/, '');
+            const parts = [before, proxyLines];
+            if (after) {
+                parts.push(after);
+            }
+            return parts.filter(Boolean).join('\n');
+        }
+
+        let insertAt = 0;
+        while (insertAt < lines.length && (/^\s*$/.test(lines[insertAt]) || lines[insertAt].startsWith('#'))) {
+            insertAt += 1;
+        }
+
+        const before = lines.slice(0, insertAt).join('\n').replace(/\s*$/, '');
+        const after = lines.slice(insertAt).join('\n').replace(/^\s*/, '');
+        const parts = [];
+        if (before) {
+            parts.push(before);
+        }
+        parts.push(`proxies:\n${proxyLines}`);
+        if (after) {
+            parts.push(after);
+        }
+        return parts.join('\n\n');
+    }
+
+    resolveRuleTargetName(outbound) {
+        if (outbound === 'Location:CN') {
+            return 'DIRECT';
+        }
+        if (outbound === 'Private' || outbound === 'Non-China') {
+            return this.t('outboundNames.Node Select');
+        }
+        return this.t(`outboundNames.${outbound}`);
     }
 
     /**
@@ -291,6 +378,24 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
     }
 
     addProxyToConfig(proxy) {
+        if (this.preserveMode) {
+            if (!proxy?.name || this.preserveExistingProxyNames.has(proxy.name)) {
+                return;
+            }
+            this.preserveExistingProxyNames.add(proxy.name);
+            addProxyWithDedup(this.preserveAppendedProxies, proxy, {
+                getName: (item) => item?.name,
+                setName: (item, name) => {
+                    if (item) item.name = name;
+                },
+                isSame: (a = {}, b = {}) => {
+                    const { name: _name, ...restOfProxy } = b;
+                    const { name: __name, ...restOfExisting } = a;
+                    return JSON.stringify(restOfProxy) === JSON.stringify(restOfExisting);
+                }
+            });
+            return;
+        }
         this.config.proxies = this.config.proxies || [];
         addProxyWithDedup(this.config.proxies, proxy, {
             getName: (item) => item?.name,
@@ -322,7 +427,8 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
             proxies: deepCopy(uniqueNames(proxyList)),
             url: 'https://www.gstatic.com/generate_204',
             interval: 300,
-            lazy: false
+            lazy: false,
+            tolerance: 20
         };
 
         // Add 'use' field if we have proxy-providers
@@ -362,6 +468,35 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
         this.config['proxy-groups'].unshift(group);
     }
 
+    addFailoverGroup(proxyList) {
+        this.config['proxy-groups'] = this.config['proxy-groups'] || [];
+        const name = this.t('outboundNames.Failover');
+        if (this.hasProxyGroup(name)) return;
+
+        const group = this.groupByCountry
+            ? {
+                name,
+                type: 'fallback',
+                proxies: [
+                    ...(this.manualGroupName ? [this.manualGroupName] : []),
+                    ...this.countryGroupNames
+                ],
+                url: 'https://www.gstatic.com/generate_204',
+                interval: 300,
+                lazy: false
+            }
+            : {
+                name,
+                type: 'fallback',
+                proxies: deepCopy(uniqueNames(proxyList)),
+                url: 'https://www.gstatic.com/generate_204',
+                interval: 300,
+                lazy: false
+            };
+
+        this.config['proxy-groups'].push(group);
+    }
+
     buildSelectGroupMembers(proxyList = []) {
         return buildSelectorMembers({
             proxyList,
@@ -373,16 +508,26 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
         });
     }
 
+    buildRuleGroupMembers() {
+        const members = [
+            this.t('outboundNames.Node Select'),
+            this.t('outboundNames.Failover'),
+            ...(this.includeAutoSelect ? [this.t('outboundNames.Auto Select')] : [])
+        ];
+        return uniqueNames(members);
+    }
+
     addOutboundGroups(outbounds, proxyList) {
         outbounds.forEach(outbound => {
+            if (this.getHiddenRuleGroups().has(outbound)) {
+                return;
+            }
             if (outbound !== this.t('outboundNames.Node Select')) {
                 const name = this.t(`outboundNames.${outbound}`);
                 if (!this.hasProxyGroup(name)) {
-                    let proxies = this.buildSelectGroupMembers(proxyList);
-                    // For rules that should default to DIRECT, move DIRECT to the front
-                    if (DIRECT_DEFAULT_RULES.has(outbound)) {
-                        proxies = ['DIRECT', ...proxies.filter(p => p !== 'DIRECT')];
-                    }
+                    const proxies = outbound === 'Ad Block'
+                        ? ['REJECT', 'DIRECT']
+                        : this.buildRuleGroupMembers();
                     const group = {
                         type: "select",
                         name,
@@ -404,7 +549,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
             this.customRules.forEach(rule => {
                 const name = this.t(`outboundNames.${rule.name}`);
                 if (!this.hasProxyGroup(name)) {
-                    const proxies = this.buildSelectGroupMembers(proxyList);
+                    const proxies = this.buildRuleGroupMembers();
                     const group = {
                         type: "select",
                         name,
@@ -424,7 +569,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
     addFallBackGroup(proxyList) {
         const name = this.t('outboundNames.Fall Back');
         if (this.hasProxyGroup(name)) return;
-        const proxies = this.buildSelectGroupMembers(proxyList);
+        const proxies = this.buildFallBackMembers(proxyList);
         const group = {
             type: "select",
             name,
@@ -436,6 +581,321 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
             group.use = providerNames;
         }
         this.config['proxy-groups'].push(group);
+    }
+
+    buildFallBackMembers(proxyList = []) {
+        const nodeSelectName = this.t('outboundNames.Node Select');
+        const autoSelectName = this.t('outboundNames.Auto Select');
+        const failoverName = this.t('outboundNames.Failover');
+        const members = this.groupByCountry
+            ? [
+                nodeSelectName,
+                failoverName,
+                ...(this.includeAutoSelect ? [autoSelectName] : []),
+                'DIRECT'
+            ]
+            : [
+                nodeSelectName,
+                failoverName,
+                ...(this.includeAutoSelect ? [autoSelectName] : []),
+                'DIRECT'
+            ];
+
+        return uniqueNames(members);
+    }
+
+    reorderProxyGroups() {
+        const groups = Array.isArray(this.config['proxy-groups']) ? [...this.config['proxy-groups']] : [];
+        if (groups.length === 0) return;
+
+        const priorityNames = [
+            this.t('outboundNames.Node Select'),
+            this.t('outboundNames.Auto Select'),
+            this.t('outboundNames.Failover'),
+            this.manualGroupName
+        ].filter(Boolean);
+        const fallbackName = normalizeGroupName(this.t('outboundNames.Fall Back'));
+
+        const countryGroupSet = new Set(this.countryGroupNames);
+        const priorityMap = new Map(priorityNames.map((name, index) => [normalizeGroupName(name), index]));
+
+        groups.sort((a, b) => {
+            const aName = normalizeGroupName(a?.name);
+            const bName = normalizeGroupName(b?.name);
+            const aPriority = aName === fallbackName
+                ? 999
+                : priorityMap.has(aName) ? priorityMap.get(aName) : (countryGroupSet.has(a?.name) ? 10 : 20);
+            const bPriority = bName === fallbackName
+                ? 999
+                : priorityMap.has(bName) ? priorityMap.get(bName) : (countryGroupSet.has(b?.name) ? 10 : 20);
+
+            if (aPriority !== bPriority) {
+                return aPriority - bPriority;
+            }
+
+            return 0;
+        });
+
+        this.config['proxy-groups'] = groups;
+    }
+
+    buildOrderedConfig() {
+        const preferredOrder = [
+            'proxies',
+            'proxy-providers',
+            'mixed-port',
+            'port',
+            'socks-port',
+            'allow-lan',
+            'bind-address',
+            'mode',
+            'ipv6',
+            'unified-delay',
+            'tcp-concurrent',
+            'log-level',
+            'find-process-mode',
+            'global-client-fingerprint',
+            'keep-alive-idle',
+            'keep-alive-interval',
+            'profile',
+            'sniffer',
+            'tun',
+            'geodata-mode',
+            'geo-auto-update',
+            'geodata-loader',
+            'geo-update-interval',
+            'geox-url',
+            'dns',
+            'proxy-groups',
+            'rules',
+            'rule-providers',
+            'external-controller',
+            'external-ui',
+            'external-ui-name',
+            'external-ui-url',
+            'secret'
+        ];
+
+        const ordered = {};
+        preferredOrder.forEach(key => {
+            if (Object.prototype.hasOwnProperty.call(this.config, key)) {
+                ordered[key] = this.config[key];
+            }
+        });
+
+        Object.entries(this.config).forEach(([key, value]) => {
+            if (!Object.prototype.hasOwnProperty.call(ordered, key)) {
+                ordered[key] = value;
+            }
+        });
+
+        return ordered;
+    }
+
+    dumpTopLevelSection(key, value) {
+        const baseOptions = {
+            lineWidth: -1,
+            noRefs: true
+        };
+
+        if (key === 'proxies' || key === 'proxy-groups') {
+            if (!Array.isArray(value) || value.length === 0) {
+                return `${key}: []`;
+            }
+            const lines = [`${key}:`];
+            value.forEach(item => {
+                const normalizedItem = this.normalizeInlineObject(key, item);
+                const rendered = yaml.dump([normalizedItem], {
+                    ...baseOptions,
+                    flowLevel: 1
+                }).trimEnd();
+                lines.push(...rendered.split('\n').map(line => `  ${line}`));
+            });
+            return lines.join('\n');
+        }
+
+        if (key === 'rule-providers' || key === 'proxy-providers') {
+            if (!value || Object.keys(value).length === 0) {
+                return `${key}: {}`;
+            }
+            if (key === 'rule-providers') {
+                return this.dumpRuleProvidersWithAnchors(value);
+            }
+            const lines = [`${key}:`];
+            Object.entries(value).forEach(([providerName, providerConfig]) => {
+                const rendered = yaml.dump({ [providerName]: this.normalizeInlineObject(key, providerConfig) }, {
+                    ...baseOptions,
+                    flowLevel: 1
+                }).trimEnd();
+                lines.push(...rendered.split('\n').map(line => `  ${line}`));
+            });
+            return lines.join('\n');
+        }
+
+        if (key === 'sniffer') {
+            return yaml.dump({ [key]: value }, {
+                ...baseOptions,
+                flowLevel: 3
+            }).trimEnd();
+        }
+
+        if (key === 'tun' || key === 'dns') {
+            return yaml.dump({ [key]: value }, {
+                ...baseOptions,
+                flowLevel: 2
+            }).trimEnd();
+        }
+
+        return yaml.dump({ [key]: value }, baseOptions).trimEnd();
+    }
+
+    dumpInlineObject(value) {
+        return yaml.dump(value, {
+            flowLevel: 0,
+            lineWidth: -1,
+            noRefs: true
+        }).trimEnd();
+    }
+
+    normalizeInlineObject(sectionKey, value) {
+        if (!value || Array.isArray(value) || typeof value !== 'object') {
+            return value;
+        }
+
+        let preferredKeys = [];
+        if (sectionKey === 'proxy-groups') {
+            preferredKeys = ['name', 'type', 'proxies', 'use', 'include-all', 'filter', 'url', 'interval', 'lazy', 'tolerance'];
+        } else if (sectionKey === 'rule-providers' || sectionKey === 'proxy-providers') {
+            preferredKeys = ['type', 'format', 'behavior', 'url', 'path', 'interval', 'health-check'];
+        } else if (sectionKey === 'proxies') {
+            preferredKeys = ['name', 'type', 'server', 'port', 'ports', 'uuid', 'password', 'cipher', 'udp', 'tls', 'client-fingerprint', 'servername', 'sni', 'network', 'ws-opts', 'reality-opts', 'grpc-opts', 'tfo', 'skip-cert-verify', 'flow'];
+        }
+
+        const normalized = {};
+        preferredKeys.forEach(key => {
+            if (Object.prototype.hasOwnProperty.call(value, key) && value[key] !== undefined) {
+                normalized[key] = value[key];
+            }
+        });
+
+        Object.entries(value).forEach(([key, entryValue]) => {
+            if (!Object.prototype.hasOwnProperty.call(normalized, key) && entryValue !== undefined) {
+                normalized[key] = entryValue;
+            }
+        });
+
+        return normalized;
+    }
+
+    buildRuleAnchorTemplates(providers) {
+        const defaults = {
+            ip: { type: 'http', interval: 86400, behavior: 'ipcidr', format: 'mrs' },
+            domain: { type: 'http', interval: 86400, behavior: 'domain', format: 'mrs' },
+            class: { type: 'http', interval: 86400, behavior: 'classical', format: 'text' }
+        };
+
+        Object.values(providers || {}).forEach(provider => {
+            if (!provider || typeof provider !== 'object') return;
+            if (provider.behavior === 'ipcidr') {
+                defaults.ip = {
+                    type: provider.type,
+                    interval: provider.interval,
+                    behavior: provider.behavior,
+                    format: provider.format
+                };
+            } else if (provider.behavior === 'domain') {
+                defaults.domain = {
+                    type: provider.type,
+                    interval: provider.interval,
+                    behavior: provider.behavior,
+                    format: provider.format
+                };
+            } else if (provider.behavior === 'classical') {
+                defaults.class = {
+                    type: provider.type,
+                    interval: provider.interval,
+                    behavior: provider.behavior,
+                    format: provider.format
+                };
+            }
+        });
+
+        return defaults;
+    }
+
+    dumpRuleProvidersWithAnchors(providers) {
+        const anchors = this.buildRuleAnchorTemplates(providers);
+        const lines = [
+            'rule-anchor:',
+            `  ip: &ip ${this.dumpInlineObject(anchors.ip)}`,
+            `  domain: &domain ${this.dumpInlineObject(anchors.domain)}`,
+            `  class: &class ${this.dumpInlineObject(anchors.class)}`,
+            'rule-providers:'
+        ];
+
+        Object.entries(providers).forEach(([providerName, providerConfig]) => {
+            const normalized = this.normalizeInlineObject('rule-providers', providerConfig);
+            const anchorName = normalized.behavior === 'ipcidr'
+                ? 'ip'
+                : normalized.behavior === 'classical'
+                    ? 'class'
+                    : 'domain';
+
+            const inlineConfig = { ...normalized };
+            delete inlineConfig.type;
+            delete inlineConfig.interval;
+            delete inlineConfig.behavior;
+            delete inlineConfig.format;
+
+            const serialized = this.dumpInlineObject(inlineConfig);
+            const inner = serialized.startsWith('{') && serialized.endsWith('}')
+                ? serialized.slice(1, -1).trim()
+                : serialized;
+            const suffix = inner ? `, ${inner}` : '';
+            lines.push(`  ${providerName}: {<<: *${anchorName}${suffix}}`);
+        });
+
+        return lines.join('\n');
+    }
+
+    getSectionHeader(key) {
+        switch (key) {
+            case 'proxies':
+                return '# 节点信息';
+            case 'mixed-port':
+                return '# 全局配置';
+            case 'sniffer':
+                return '# 嗅探';
+            case 'tun':
+                return '# 入站';
+            case 'dns':
+                return '# DNS模块';
+            case 'proxy-groups':
+                return '# 出站策略';
+            case 'rules':
+                return '# 规则匹配';
+            case 'rule-providers':
+                return '# 规则集\n## type: http/file/inline  behavior: domain/ipcidr/classical  format: yaml/text/mrs';
+            default:
+                return '';
+        }
+    }
+
+    dumpFormattedConfig(config) {
+        const lines = [];
+
+        Object.entries(config).forEach(([key, value]) => {
+            const header = this.getSectionHeader(key);
+            if (header) {
+                if (lines.length > 0) {
+                    lines.push('');
+                }
+                lines.push(header);
+            }
+            lines.push(this.dumpTopLevelSection(key, value));
+        });
+
+        return lines.join('\n');
     }
 
     addCountryGroups() {
@@ -507,6 +967,28 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
         }
         this.countryGroupNames = countryGroupNames;
         this.manualGroupName = manualGroupName;
+    }
+
+    addSelectors() {
+        if (this.preserveMode) {
+            return;
+        }
+        const outbounds = this.getOutboundsList();
+        const proxyList = this.getProxyList();
+
+        this.addAutoSelectGroup(proxyList);
+        this.addNodeSelectGroup(proxyList);
+        if (this.groupByCountry) {
+            this.addCountryGroups();
+        }
+        this.addFailoverGroup(proxyList);
+        this.addOutboundGroups(outbounds, proxyList);
+        this.addCustomRuleGroups(proxyList);
+        this.addFallBackGroup(proxyList);
+
+        if (this.pendingUserProxyGroups && this.pendingUserProxyGroups.length > 0) {
+            this.mergeUserProxyGroups(this.pendingUserProxyGroups);
+        }
     }
 
     /**
@@ -618,6 +1100,9 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
     }
 
     formatConfig() {
+        if (this.preserveMode) {
+            return this.mergePreserveRawConfig();
+        }
         const rules = this.generateRules();
         const useMrs = supportsMrsFormat(this.userAgent);
         const { site_rule_providers, ip_rule_providers } = generateClashRuleSets(this.selectedRules, this.customRules, useMrs);
@@ -625,7 +1110,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
             ...site_rule_providers,
             ...ip_rule_providers
         };
-        const ruleResults = emitClashRules(rules, this.t);
+        const ruleResults = emitClashRules(rules, this.t, (outbound) => this.resolveRuleTargetName(outbound));
 
         // Add proxy-providers if we have any
         if (this.providerUrls.length > 0) {
@@ -639,6 +1124,7 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
         this.validateProxyGroups();
 
         sanitizeClashProxyGroups(this.config);
+        this.reorderProxyGroups();
 
         this.config.rules = [
             ...ruleResults,
@@ -666,6 +1152,6 @@ export class ClashConfigBuilder extends BaseConfigBuilder {
             this.config['secret'] = secret;
         }
 
-        return yaml.dump(this.config);
+        return this.dumpFormattedConfig(this.buildOrderedConfig());
     }
 }

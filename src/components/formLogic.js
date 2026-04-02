@@ -89,6 +89,7 @@ export const formLogicFn = (t) => {
             externalController: '',
             externalUiDownloadUrl: '',
             configType: 'singbox',
+            clashPreserveMode: false,
             configEditor: '',
             savingConfig: false,
             currentConfigId: '',
@@ -138,6 +139,7 @@ export const formLogicFn = (t) => {
                 this.customUA = localStorage.getItem('userAgent') || '';
                 this.configEditor = localStorage.getItem('configEditor') || '';
                 this.configType = localStorage.getItem('configType') || 'singbox';
+                this.clashPreserveMode = localStorage.getItem('clashPreserveMode') === 'true';
                 this.customShortCode = localStorage.getItem('customShortCode') || '';
                 const initialUrlParams = new URLSearchParams(window.location.search);
                 this.currentConfigId = initialUrlParams.get('configId') || '';
@@ -175,6 +177,7 @@ export const formLogicFn = (t) => {
                     localStorage.setItem('configType', val);
                     this.resetConfigValidation();
                 });
+                this.$watch('clashPreserveMode', val => localStorage.setItem('clashPreserveMode', val));
                 this.$watch('customShortCode', val => localStorage.setItem('customShortCode', val));
                 this.$watch('accordionSections', val => localStorage.setItem('accordionSections', JSON.stringify(val)), { deep: true });
             },
@@ -272,7 +275,8 @@ export const formLogicFn = (t) => {
                         },
                         body: JSON.stringify({
                             type: this.configType,
-                            content: payloadContent
+                            content: payloadContent,
+                            mode: this.configType === 'clash' && this.clashPreserveMode ? 'preserve' : 'standard'
                         })
                     });
                     const responseText = await response.text();
