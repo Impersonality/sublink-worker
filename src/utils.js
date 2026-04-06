@@ -271,6 +271,7 @@ export function parseUrlParams(url) {
 export function createTlsConfig(params) {
 	let tls = { enabled: false };
 	if (params.security && params.security !== 'none') {
+		const clientFingerprint = params.fp || params.fingerprint || params['client-fingerprint'];
 		tls = {
 			enabled: true,
 			server_name: params.sni || params.host,
@@ -280,11 +281,18 @@ export function createTlsConfig(params) {
 			//   fingerprint: "chrome"
 			// },
 		};
+		if (clientFingerprint || params.security === 'reality') {
+			tls.utls = {
+				enabled: true,
+				fingerprint: clientFingerprint || 'chrome',
+			};
+		}
 		if (params.security === 'reality') {
 			tls.reality = {
 				enabled: true,
 				public_key: params.pbk,
 				short_id: params.sid,
+				...(params.pqv !== undefined ? { mldsa65_verify: params.pqv } : {}),
 			};
 		}
 	}

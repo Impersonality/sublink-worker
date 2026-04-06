@@ -1,4 +1,4 @@
-import { base64ToBinary } from '../../utils.js';
+import { base64ToBinary, parseBool } from '../../utils.js';
 
 function parseServer(serverPart) {
     const match = serverPart.match(/\[([^\]]+)\]:(\d+)/);
@@ -60,7 +60,7 @@ function parsePluginString(pluginStr) {
     };
 }
 
-function createConfig(tag, server, server_port, method, password, pluginInfo) {
+function createConfig(tag, server, server_port, method, password, pluginInfo, udp) {
     const config = {
         tag: tag || 'Shadowsocks',
         type: 'shadowsocks',
@@ -71,6 +71,10 @@ function createConfig(tag, server, server_port, method, password, pluginInfo) {
         network: 'tcp',
         tcp_fast_open: false
     };
+
+    if (udp !== undefined) {
+        config.udp = udp;
+    }
 
     // Add plugin fields if present
     if (pluginInfo) {
@@ -101,11 +105,15 @@ export function parseShadowsocks(url) {
 
     // Parse plugin from query string
     let pluginInfo = null;
+    let udp;
     if (queryString) {
         const params = new URLSearchParams(queryString);
         const pluginParam = params.get('plugin');
         if (pluginParam) {
             pluginInfo = parsePluginString(pluginParam);
+        }
+        if (params.has('udp')) {
+            udp = parseBool(params.get('udp'));
         }
     }
 
@@ -116,7 +124,7 @@ export function parseShadowsocks(url) {
             const [methodAndPass, serverInfo] = decodedLegacy.split('@');
             const [method, password] = methodAndPass.split(':');
             const [server, server_port] = parseServer(serverInfo);
-            return createConfig(tag, server, server_port, method, password, pluginInfo);
+            return createConfig(tag, server, server_port, method, password, pluginInfo, udp);
         }
 
         let decodedParts = base64ToBinary(decodeURIComponent(base64)).split(':');
@@ -124,7 +132,7 @@ export function parseShadowsocks(url) {
         let password = decodedParts.slice(1).join(':');
         let [server, server_port] = parseServer(serverPart);
 
-        return createConfig(tag, server, server_port, method, password, pluginInfo);
+        return createConfig(tag, server, server_port, method, password, pluginInfo, udp);
     } catch (e) {
         console.error('Failed to parse shadowsocks URL:', e);
         return null;

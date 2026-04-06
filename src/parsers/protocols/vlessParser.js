@@ -6,12 +6,6 @@ export function parseVless(url) {
     const { host, port } = parseServerInfo(serverInfo);
 
     const tls = createTlsConfig(params);
-    if (tls.reality) {
-        tls.utls = {
-            enabled: true,
-            fingerprint: 'chrome'
-        };
-    }
     const transport = params.type !== 'tcp' ? createTransportConfig(params) : undefined;
 
     // Parse UDP setting - primarily used for Clash output
